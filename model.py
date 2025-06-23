@@ -13,6 +13,7 @@ class NERModel(nn.Module):
         self.classifier = nn.Linear(self.bert.config.hidden_size, num_labels, device=device)
         self.dropout = nn.Dropout(0.1)
         self.device = device
+        self.num_labels = num_labels
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
         # bert输入文本vocab ids

@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 PRETRAINED_MODEL_DIR = "D:\\models\\chinese-roberta-wwm-ext"
 
-def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: BertModel, num_epochs, lr=0.003):
+def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERModel, num_epochs, lr=0.003):
     loss = nn.CrossEntropyLoss(reduction='none')
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     device = model.device
@@ -21,7 +21,7 @@ def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: BertMod
             optimizer.zero_grad()
             input_ids = inputs['input_ids'].to(device)
             attention_mask = inputs['attention_mask'].to(device)
-            label_ids = F.one_hot(inputs['label_ids'].to(device)).float()
+            label_ids = F.one_hot(inputs['label_ids'].to(device), num_classes=model.num_labels).float()
             output = model(input_ids=input_ids, attention_mask=attention_mask)
             l = loss(output, label_ids).mean()
             l.backward()
@@ -34,12 +34,11 @@ def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: BertMod
             for inputs in valid_loader:
                 input_ids = inputs['input_ids'].to(device)
                 attention_mask = inputs['attention_mask'].to(device)
-                label_ids = F.one_hot(inputs['label_ids'].to(device)).float()
+                label_ids = F.one_hot(inputs['label_ids'].to(device), num_classes=model.num_labels).float()
                 output = model(input_ids=input_ids, attention_mask=attention_mask)
                 l = loss(output, label_ids).mean()
                 valid_losses.append(l)
             print(f'epoch:{epoch},valid_loss={torch.tensor(valid_losses).mean()}')
-
 
 def get_label_dict(file:str):
     with open(file, 'r', encoding='utf-8') as f:
