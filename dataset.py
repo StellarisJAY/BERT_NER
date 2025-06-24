@@ -1,8 +1,14 @@
 import json
 from torch.utils.data import Dataset, DataLoader
 import torch
+from transformers.tokenization_utils_base import BatchEncoding
+import os
 
 def load_data(data_dir):
+    train_file, valid_file, labels_file = data_dir+'/train_label.json', data_dir+'/valid_label.json', data_dir+'/labels.json'
+    if os.path.exists(train_file) and os.path.exists(valid_file) and os.path.exists(labels_file):
+        return
+
     with open(data_dir + "/train.json", 'r', encoding='utf-8') as train:
         train_lines = train.readlines()
     with open(data_dir + "/dev.json", 'r', encoding='utf-8') as dev:
@@ -55,35 +61,53 @@ class NERDataset(Dataset):
         self.samples = min(len(self.data), samples)
         self.texts = [item["text"] for item in self.data][:self.samples]
         self.labels = [item["label"] for item in self.data][:self.samples]
+
+        self.id_to_label = [''] * len(self.label_dict)
+        for k in self.label_dict:
+            self.id_to_label[self.label_dict[k]] = k
     
     def __len__(self):
         return self.samples
 
     def __getitem__(self, idx):
-        # tokenizer + [CLS][SEP] + to_vocab_id
-        inputs = self.tokenizer.encode_plus(
+        # tokenize + [CLS][SEP] + to_vocab_id
+        inputs = self.tokenizer(
             self.texts[idx],
-            None,
             add_special_tokens=True,
             padding='max_length',
             truncation=True,
             max_length=self.max_len,
             return_tensors='pt'
         )
+        word_ids = inputs.word_ids()
         input_ids = inputs['input_ids'].squeeze()
         attention_mask = inputs['attention_mask'].squeeze()
-        label_ids = [self.label_dict[label] for label in self.labels[idx]]
-        # [CLS]和[SEP]token标记为O
-        label_ids.insert(0, 0)
-        label_ids.append(0)
-
-        if len(label_ids) > self.max_len:
-            label_ids = label_ids[:self.max_len]
-        if len(label_ids) < self.max_len:
-            label_ids.extend([0] * (self.max_len - len(label_ids)))
-
+        labels = self.labels[idx]
+        label_ids = self.align_labels(input_ids, word_ids, labels)
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "label_ids": torch.tensor(label_ids, dtype=torch.long),
         }
+    
+    # 对于存在子词和中英文字符混合的情况，tokenize后的下标和数据集的下标没有对齐，需要对齐下标
+    def align_labels(self, input_ids, word_ids, labels):
+        tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
+        label_ids = []
+        previous_word_id = None
+        char_idx = 0
+        token_idx = 0
+        for word_id in word_ids:
+            if word_id is None:
+                # 当前token是填充token，label为0
+                label_ids.append(0)
+            else:
+                # 该token为实体开始token
+                if word_id != previous_word_id: 
+                    previous_word_id = word_id
+                # 字符下标对应的label
+                label_ids.append(self.label_dict.get(labels[char_idx])) 
+                # 跨过n个char
+                char_idx += len(tokens[token_idx].removeprefix('##').removeprefix('[UNK]'))
+            token_idx += 1
+        return label_ids 

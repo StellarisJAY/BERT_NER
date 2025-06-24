@@ -1,0 +1,10 @@
+pretrained_model: D:/models/chinese-roberta-wwm-ext
+train: true
+num_epochs: 2
+lr: 0.00003
+max_length: 32
+train_samples: 128
+valid_samples: 32
+batch_size: 32
+data_dir: data
+gpu: false
