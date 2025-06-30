@@ -15,7 +15,7 @@ def predict(model:NERModel, text:str, tokenizer: BertTokenizerFast, label_dict: 
     )
     tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'].squeeze())
     # (1, n, num_labels)
-    output = model.forward(inputs['input_ids'], inputs['attention_mask'])
+    output = model.forward(inputs['input_ids'].to(model.device), inputs['attention_mask'].to(model.device))
     label_ids = torch.argmax(output, dim=-1).view(-1) #(n)
     result = convert_label_to_entities(tokens, label_ids, label_dict)
     return result

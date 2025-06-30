@@ -17,10 +17,10 @@ class NERModel(nn.Module):
         self.num_labels = num_labels
         # 增加分类器部分的正则化
         self.classifier = nn.Sequential(
-            nn.Linear(self.bert_config.hidden_size, 256),
+            nn.Linear(self.bert_config.hidden_size, 256, device=device),
             nn.Dropout(config['dropout']),
             nn.ReLU(),
-            nn.Linear(256, num_labels)
+            nn.Linear(256, num_labels, device=device)
         )
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):

@@ -8,9 +8,13 @@ from tqdm import tqdm
 import yaml
 import os
 
-def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERModel, num_epochs=5, lr=3e-5):
+def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERModel, label_dict: dict, num_epochs=5, lr=3e-5):
     model.train(True)
-    loss = nn.CrossEntropyLoss(reduction='none')
+    # 提高B-标签权重，降低O标签权重，平衡标签出现的频率对预测造成的影响
+    label_weights = torch.ones(len(label_dict)).float().to(model.device)
+    label_weights[0] = 0.1
+    label_weights[1::2] *= 2.0
+    loss = nn.CrossEntropyLoss(reduction='none', weight=label_weights)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
     device = model.device
     for epoch in range(num_epochs):
@@ -23,15 +27,11 @@ def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERMode
             label_ids = inputs['label_ids'].to(device) # (B,n)
             # forward
             output = model(input_ids=input_ids, attention_mask=attention_mask)
-            # 修改后应增加mask过滤
-            # mask = (label_ids.view(-1) != 0).float()  # 假设0是padding的标签
-            # l = loss(output.view(-1, model.num_labels), label_ids.view(-1)) * mask
-            # l = l.sum() / mask.sum()
             l = loss(output.view(-1, model.num_labels), label_ids.view(-1)).mean()
             l.backward()
             optimizer.step()
             train_losses.append(l)
-            train_acc.append(accuracy(output, inputs['label_ids']))
+            train_acc.append(accuracy(output, label_ids))
         
         with torch.no_grad():
             print(f'epoch:{epoch},train_loss={torch.tensor(train_losses).mean()},train_acc={torch.tensor(train_acc).mean().item() * 100:.2f}%')
@@ -54,7 +54,7 @@ def valid(valid_loader: DataLoader, model: NERModel, loss):
         output = model(input_ids=input_ids, attention_mask=attention_mask)
         l = loss(output.view(-1, model.num_labels), label_ids.view(-1)).mean()
         valid_losses.append(l)
-        valid_acc.append(accuracy(output, inputs['label_ids']))
+        valid_acc.append(accuracy(output, label_ids))
     return (torch.tensor(valid_losses).mean().item(), torch.tensor(valid_acc).mean().item())
 
 def test(test_loader: DataLoader, model: NERModel):
@@ -103,7 +103,7 @@ if __name__ == "__main__":
         print(f'测试集:{len(test_dataset)}条')
     print('开始训练...')
     # 训练
-    train_ner(train_loader, valid_loader, model, num_epochs=num_epochs, lr=lr)
+    train_ner(train_loader, valid_loader, model, label_dict=label_dict, num_epochs=num_epochs, lr=lr)
     # 保存模型参数
     model.save(config['save_model_dir'])
     tokenizer.save_pretrained(config['save_model_dir'])
