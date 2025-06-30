@@ -1,8 +1,11 @@
 import json
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import torch
-from transformers.tokenization_utils_base import BatchEncoding
 import os
+
+def get_label_dict(file:str):
+    with open(file, 'r', encoding='utf-8') as f:
+        return json.loads(f.read())
 
 def load_data(data_dir):
     train_file, valid_file, labels_file = data_dir+'/train_label.json', data_dir+'/valid_label.json', data_dir+'/labels.json'
@@ -50,64 +53,54 @@ def convert_data(lines: list[str], label_dict: dict):
 
 
 class NERDataset(Dataset):
-    def __init__(self, file_path, label_dict, tokenizer, max_len, samples=1000):
+    def __init__(self, file_path, label_dict, tokenizer, max_len):
         super().__init__()
-        self.samples = samples
         self.label_dict = label_dict
         self.tokenizer = tokenizer
         self.max_len = max_len
         with open(file_path, 'r', encoding='utf-8') as f:
             self.data = json.loads(f.read())
-        self.samples = min(len(self.data), samples)
+        self.samples = len(self.data)
         self.texts = [item["text"] for item in self.data][:self.samples]
         self.labels = [item["label"] for item in self.data][:self.samples]
 
         self.id_to_label = [''] * len(self.label_dict)
         for k in self.label_dict:
             self.id_to_label[self.label_dict[k]] = k
+        self.processed_data = []
+        for i in range(self.samples):
+            self.processed_data.append(self.process_data(self.texts[i], self.labels[i]))
+
+    def process_data(self, text: str, labels: list):
+        # tokenize + [CLS][SEP] + to_vocab_id
+        inputs = self.tokenizer(
+            text,
+            add_special_tokens=True,
+            padding='max_length',
+            max_length=self.max_len,
+            truncation='longest_first',
+            return_offsets_mapping=True
+        )
+        input_ids = inputs['input_ids']
+        attention_mask = inputs['attention_mask']
+        label_ids = self.align_label(self.label_dict, inputs['offset_mapping'], labels)
+        return {
+            "input_ids": torch.tensor(input_ids),
+            "attention_mask": torch.tensor(attention_mask),
+            "label_ids": torch.tensor(label_ids, dtype=torch.long),
+        }
     
     def __len__(self):
         return self.samples
 
     def __getitem__(self, idx):
-        # tokenize + [CLS][SEP] + to_vocab_id
-        inputs = self.tokenizer(
-            self.texts[idx],
-            add_special_tokens=True,
-            padding='max_length',
-            truncation=True,
-            max_length=self.max_len,
-            return_tensors='pt'
-        )
-        word_ids = inputs.word_ids()
-        input_ids = inputs['input_ids'].squeeze()
-        attention_mask = inputs['attention_mask'].squeeze()
-        labels = self.labels[idx]
-        label_ids = self.align_labels(input_ids, word_ids, labels)
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "label_ids": torch.tensor(label_ids, dtype=torch.long),
-        }
-    
-    # 对于存在子词和中英文字符混合的情况，tokenize后的下标和数据集的下标没有对齐，需要对齐下标
-    def align_labels(self, input_ids, word_ids, labels):
-        tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
-        label_ids = []
-        previous_word_id = None
-        char_idx = 0
-        token_idx = 0
-        for word_id in word_ids:
-            if word_id is None:
-                # 当前token是填充token，label为0
-                label_ids.append(0)
-            else:
-                # 该token为实体开始token
-                if word_id != previous_word_id: 
-                    previous_word_id = word_id
-                # 字符下标对应的label
-                label_ids.append(self.label_dict.get(labels[char_idx])) 
-                # 跨过n个char
-                char_idx += len(tokens[token_idx].removeprefix('##').removeprefix('[UNK]'))
-            token_idx += 1
-        return label_ids 
+        return self.processed_data[idx]
+        
+    def align_label(self, label_dict: dict, offset_mapping: list[tuple], labels: list[str]):
+        label_ids = [0] * len(offset_mapping)
+        for i in range(len(offset_mapping)):
+            (start, end) = offset_mapping[i]
+            if start == 0 and end == 0:
+                continue
+            label_ids[i] = label_dict[labels[start]]
+        return label_ids

@@ -1,10 +1,11 @@
 pretrained_model: D:/models/chinese-roberta-wwm-ext
 train: true
-num_epochs: 2
-lr: 0.00003
-max_length: 32
-train_samples: 128
-valid_samples: 32
+num_epochs: 5
+lr: 2e-5  # 微调学习率 2e-5
+max_length: 256 # 输入序列最大长度
 batch_size: 32
-data_dir: data
+data_dir: data # 数据集目录
 gpu: false
+num_hidden_layers: 1  # 预训练模型的Transformer Encoder层数，最大12，层数越多模型越大。少量数据建议层数减少
+dropout: 0.3
+save_model_dir: ./trained_model
