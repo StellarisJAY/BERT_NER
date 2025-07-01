@@ -11,11 +11,13 @@ import os
 def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERModel, label_dict: dict, num_epochs=5, lr=3e-5):
     model.train(True)
     # 提高B-标签权重，降低O标签权重，平衡标签出现的频率对预测造成的影响
+    # TODO 从数据集统计每个标签的频率，来更合理地调整标签权重
     label_weights = torch.ones(len(label_dict)).float().to(model.device)
     label_weights[0] = 0.1
-    label_weights[1::2] *= 2.0
+    label_weights[1::2] *= 1.5
+    label_weights[label_dict.get('B-WORK')] = 2.0 # 提高B-WORK标签的权重
     loss = nn.CrossEntropyLoss(reduction='none', weight=label_weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5) # TODO 调整weight_decay
     device = model.device
     for epoch in range(num_epochs):
         train_losses = []
@@ -26,8 +28,12 @@ def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERMode
             attention_mask = inputs['attention_mask'].to(device) #(B,n)
             label_ids = inputs['label_ids'].to(device) # (B,n)
             # forward
-            output = model(input_ids=input_ids, attention_mask=attention_mask)
-            l = loss(output.view(-1, model.num_labels), label_ids.view(-1)).mean()
+            output = model(input_ids=input_ids, attention_mask=attention_mask) #(B, n, num_labels)
+            # 只计算非[PAD]部分的损失
+            mask = attention_mask.view(-1) == 1
+            output = output.view(-1, model.num_labels)[mask]
+            label_ids = label_ids.view(-1)[mask]
+            l = loss(output, label_ids).mean()
             l.backward()
             optimizer.step()
             train_losses.append(l)
@@ -35,6 +41,7 @@ def train_ner(train_loader: DataLoader, valid_loader: DataLoader, model: NERMode
         
         with torch.no_grad():
             print(f'epoch:{epoch},train_loss={torch.tensor(train_losses).mean()},train_acc={torch.tensor(train_acc).mean().item() * 100:.2f}%')
+            # 验证集上评估模型
             (valid_loss,valid_acc) = valid(valid_loader, model, loss)
             print(f'epoch:{epoch},valid_loss={valid_loss},valid_acc={valid_acc * 100:.2f}%')
     model.train(False)
@@ -51,8 +58,12 @@ def valid(valid_loader: DataLoader, model: NERModel, loss):
         attention_mask = inputs['attention_mask'].to(device) # (B, n)
         label_ids = inputs['label_ids'].to(device) # (B, n)
         # forward
-        output = model(input_ids=input_ids, attention_mask=attention_mask)
-        l = loss(output.view(-1, model.num_labels), label_ids.view(-1)).mean()
+        output = model(input_ids=input_ids, attention_mask=attention_mask) # (B, n, num_labels)
+        # 只计算非[PAD]部分的损失
+        mask = attention_mask.view(-1) == 1
+        output = output.view(-1, model.num_labels)[mask]
+        label_ids = label_ids.view(-1)[mask]
+        l = loss(output, label_ids).mean()
         valid_losses.append(l)
         valid_acc.append(accuracy(output, label_ids))
     return (torch.tensor(valid_losses).mean().item(), torch.tensor(valid_acc).mean().item())
